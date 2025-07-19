@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cosmic Coil</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d0c1d;
+            --primary-color: #161b33;
+            --accent-color: #6c5ce7;
+            --text-color: #f0f0f0;
+            --food-color: #ff4757;
+            --special-food-color: #feca57;
+            --snake-color: #48dbfb;
+            --snake-powerup-color: var(--special-food-color);
+        }
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: var(--bg-color);
+            font-family: 'Orbitron', sans-serif;
+            color: var(--text-color);
+            overflow: hidden;
+        }
+        .game-wrapper {
+            text-align: center;
+        }
+        .header {
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            font-size: 3.5rem;
+            margin: 0;
+            color: var(--accent-color);
+            text-shadow: 0 0 15px var(--accent-color);
+        }
+        .score-container {
+            display: flex;
+            justify-content: space-around;
+            font-size: 1.2rem;
+            margin-top: 10px;
+        }
+        .game-container {
+            position: relative;
+            border: 3px solid var(--accent-color);
+            box-shadow: 0 0 25px rgba(108, 92, 231, 0.7);
+            background-color: var(--primary-color);
+            background-image: 
+                radial-gradient(white, rgba(255,255,255,.2) 2px, transparent 40px),
+                radial-gradient(white, rgba(255,255,255,.15) 1px, transparent 30px),
+                radial-gradient(white, rgba(255,255,255,.1) 2px, transparent 40px),
+                radial-gradient(rgba(255,255,255,.4), rgba(255,255,255,.1) 2px, transparent 30px);
+            background-size: 550px 550px, 350px 350px, 250px 250px, 150px 150px; 
+            background-position: 0 0, 40px 60px, 130px 270px, 70px 100px;
+        }
+        canvas {
+            display: block;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(13, 12, 29, 0.9);
+            text-align: center;
+            opacity: 1;
+            transition: opacity 0.5s;
+        }
+        .ui-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .ui-overlay h2 {
+            font-size: 3rem;
+            margin: 0;
+            color: var(--accent-color);
+        }
+        .ui-overlay p {
+            font-size: 1.2rem;
+            margin: 20px 0;
+        }
+        .ui-overlay button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            font-family: 'Orbitron', sans-serif;
+            color: var(--text-color);
+            background-color: var(--accent-color);
+            border: none;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            box-shadow: 0 0 10px rgba(108, 92, 231, 0.5);
+        }
+        .ui-overlay button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(108, 92, 231, 0.8);
+        }
+    </style>
+</head>
+<body>
+
+<div class="game-wrapper">
+    <div class="header">
+        <h1>Cosmic Coil</h1>
+        <div class="score-container">
+            <span id="current-score">分數: 0</span>
+            <span id="high-score">最高分: 0</span>
+        </div>
+    </div>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="500" height="500"></canvas>
+        <div id="start-screen" class="ui-overlay">
+            <h2>準備好了嗎？</h2>
+            <p>使用方向鍵移動<br>吞噬宇宙物質來得分！</p>
+            <button id="start-button">開始遊戲</button>
+        </div>
+        <div id="game-over-screen" class="ui-overlay hidden">
+            <h2>遊戲結束</h2>
+            <p id="final-score-text"></p>
+            <p id="new-highscore-text" style="color: var(--special-food-color);"></p>
+            <button id="restart-button">重新挑戰</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 遊戲設定 ---
+    const TILE_COUNT = 25;
+    const INITIAL_SPEED_MS = 120;
+    const SPECIAL_FOOD_THRESHOLD = 7;
+    const POWERUP_DURATION_MS = 5000;
+
+    // --- DOM 元素 ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const currentScoreEl = document.getElementById('current-score');
+    const highScoreEl = document.getElementById('high-score');
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const startButton = document.getElementById('start-button');
+    const restartButton = document.getElementById('restart-button');
+    const finalScoreTextEl = document.getElementById('final-score-text');
+    const newHighScoreTextEl = document.getElementById('new-highscore-text');
+
+    const GRID_SIZE = canvas.width / TILE_COUNT;
+
+    // --- 遊戲類別 ---
+    class Snake {
+        constructor() { this.reset(); }
+        reset() {
+            this.body = [{ x: 12, y: 12 }];
+            this.direction = 'right';
+            this.nextDirection = 'right';
+            this.isPoweredUp = false;
+            this.growCounter = 2; // Start with a body of 3
+        }
+        changeDirection(newDir) {
+            if (newDir === 'up' && this.direction !== 'down') this.nextDirection = 'up';
+            if (newDir === 'down' && this.direction !== 'up') this.nextDirection = 'down';
+            if (newDir === 'left' && this.direction !== 'right') this.nextDirection = 'left';
+            if (newDir === 'right' && this.direction !== 'left') this.nextDirection = 'right';
+        }
+        move() {
+            this.direction = this.nextDirection;
+            const head = { ...this.body[0] };
+            switch (this.direction) {
+                case 'up': head.y--; break;
+                case 'down': head.y++; break;
+                case 'left': head.x--; break;
+                case 'right': head.x++; break;
+            }
+            this.body.unshift(head);
+            if (this.growCounter > 0) {
+                this.growCounter--;
+            } else {
+                this.body.pop();
+            }
+        }
+        grow() { this.growCounter++; }
+        checkCollision() {
+            const head = this.body[0];
+            if (head.x < 0 || head.x >= TILE_COUNT || head.y < 0 || head.y >= TILE_COUNT) return true;
+            for (let i = 1; i < this.body.length; i++) {
+                if (head.x === this.body[i].x && head.y === this.body[i].y) return true;
+            }
+            return false;
+        }
+    }
+
+    class FoodFactory {
+        constructor() { this.foodCounter = 0; }
+        createFood(snakeBody) {
+            this.foodCounter++;
+            const type = this.foodCounter % SPECIAL_FOOD_THRESHOLD === 0 ? 'special' : 'normal';
+            let position;
+            while (true) {
+                position = {
+                    x: Math.floor(Math.random() * TILE_COUNT),
+                    y: Math.floor(Math.random() * TILE_COUNT)
+                };
+                if (!snakeBody.some(p => p.x === position.x && p.y === position.y)) break;
+            }
+            return {
+                ...position,
+                type,
+                points: type === 'special' ? 50 : 10,
+            };
+        }
+        reset() { this.foodCounter = 0; }
+    }
+
+    class ScoreManager {
+        constructor() {
+            this.score = 0;
+            this.highScore = parseInt(localStorage.getItem('cosmicCoilHighScore') || '0');
+        }
+        add(points) { this.score += points; }
+        reset() { this.score = 0; }
+        updateHighScore() {
+            if (this.score > this.highScore) {
+                this.highScore = this.score;
+                localStorage.setItem('cosmicCoilHighScore', this.highScore);
+                return true;
+            }
+            return false;
+        }
+    }
+
+    class Renderer {
+        drawRect(x, y, color, glowColor) {
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = color;
+            ctx.fillRect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+            ctx.shadowBlur = 0;
+        }
+        draw(game) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Draw food
+            const foodColor = game.food.type === 'special' ? 'var(--special-food-color)' : 'var(--food-color)';
+            this.drawRect(game.food.x, game.food.y, foodColor, foodColor);
+            // Draw snake
+            const snakeColor = game.snake.isPoweredUp ? 'var(--snake-powerup-color)' : 'var(--snake-color)';
+            game.snake.body.forEach(part => this.drawRect(part.x, part.y, snakeColor, snakeColor));
+            // Update score display
+            currentScoreEl.textContent = `分數: ${game.scoreManager.score}`;
+            highScoreEl.textContent = `最高分: ${game.scoreManager.highScore}`;
+        }
+    }
+
+    class Game {
+        constructor() {
+            this.snake = new Snake();
+            this.foodFactory = new FoodFactory();
+            this.scoreManager = new ScoreManager();
+            this.renderer = new Renderer();
+            this.food = this.foodFactory.createFood(this.snake.body);
+            this.status = 'idle';
+            this.speed = INITIAL_SPEED_MS;
+            this.powerUpTimer = null;
+            this.lastUpdateTime = 0;
+            this.gameLoop = this.gameLoop.bind(this);
+        }
+
+        start() {
+            this.status = 'playing';
+            this.speed = INITIAL_SPEED_MS;
+            this.snake.reset();
+            this.foodFactory.reset();
+            this.scoreManager.reset();
+            this.food = this.foodFactory.createFood(this.snake.body);
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+
+            document.addEventListener('keydown', this.handleInput.bind(this));
+            
+            this.lastUpdateTime = 0;
+            requestAnimationFrame(this.gameLoop);
+        }
+
+        gameLoop(currentTime) {
+            if (this.status !== 'playing') return;
+            requestAnimationFrame(this.gameLoop);
+            
+            const timeSinceLastUpdate = currentTime - this.lastUpdateTime;
+            if (timeSinceLastUpdate < this.speed) return;
+            
+            this.lastUpdateTime = currentTime;
+            this.update();
+            this.renderer.draw(this);
+        }
+
+        update() {
+            this.snake.move();
+            if (this.snake.checkCollision()) {
+                this.endGame();
+                return;
+            }
+            const head = this.snake.body[0];
+            if (head.x === this.food.x && head.y === this.food.y) {
+                this.scoreManager.add(this.food.points);
+                if (this.food.type === 'special') {
+                    this.activatePowerUp();
+                } else {
+                    this.snake.grow();
+                }
+                this.food = this.foodFactory.createFood(this.snake.body);
+                // Dynamic speed increase
+                this.speed = INITIAL_SPEED_MS - Math.floor(this.scoreManager.score / 50) * 5;
+            }
+        }
+        
+        activatePowerUp() {
+            this.snake.isPoweredUp = true;
+            const originalSpeed = this.speed;
+            this.speed *= 2; // Slow down
+            
+            clearTimeout(this.powerUpTimer);
+            this.powerUpTimer = setTimeout(() => {
+                this.snake.isPoweredUp = false;
+                this.speed = originalSpeed;
+            }, POWERUP_DURATION_MS);
+        }
+
+        endGame() {
+            this.status = 'gameover';
+            const isNewHighScore = this.scoreManager.updateHighScore();
+            finalScoreTextEl.textContent = `你的最終分數: ${this.scoreManager.score}`;
+            newHighScoreTextEl.textContent = isNewHighScore ? '恭喜！打破最高分記錄！' : '';
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        handleInput(e) {
+            this.snake.changeDirection(e.key.replace('Arrow', '').toLowerCase());
+        }
+    }
+
+    // --- 初始化 ---
+    const game = new Game();
+    game.renderer.draw(game); // Initial draw
+    highScoreEl.textContent = `最高分: ${game.scoreManager.highScore}`;
+    startButton.addEventListener('click', () => game.start());
+    restartButton.addEventListener('click', () => game.start());
+
+</script>
+</body>
+</html>

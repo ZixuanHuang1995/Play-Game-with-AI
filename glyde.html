@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glyde - 貪食蛇遊戲</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #2c3e50;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ecf0f1;
+        }
+        .game-container {
+            position: relative;
+            border: 2px solid #ecf0f1;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        canvas {
+            display: block;
+            background-color: #34495e;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(44, 62, 80, 0.85);
+            text-align: center;
+        }
+        .ui-overlay h1 {
+            font-size: 3rem;
+            margin: 0;
+            color: #e74c3c;
+        }
+        .ui-overlay p {
+            font-size: 1.2rem;
+        }
+        .ui-overlay button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            color: #2c3e50;
+            background-color: #ecf0f1;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .ui-overlay button:hover {
+            background-color: #bdc3c7;
+        }
+        #score-display {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <div id="score-display" class="hidden">分數: 0</div>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    
+    <div id="start-screen" class="ui-overlay">
+        <h1>Glyde</h1>
+        <p>使用方向鍵控制蛇，吃到紅色的食物。<br>不要撞到牆壁或自己的身體！</p>
+        <button id="start-button">開始遊戲</button>
+    </div>
+
+    <div id="game-over-screen" class="ui-overlay hidden">
+        <h1 id="game-over-title">遊戲結束</h1>
+        <p id="final-score"></p>
+        <button id="restart-button">重新開始</button>
+    </div>
+</div>
+
+<script>
+    class Snake {
+        constructor(tileCount, gridSize) {
+            this.tileCount = tileCount;
+            this.gridSize = gridSize;
+            this.reset();
+        }
+
+        reset() {
+            this.body = [
+                { x: 10, y: 10 },
+                { x: 9, y: 10 },
+                { x: 8, y: 10 }
+            ];
+            this.direction = 'right';
+            this.nextDirection = 'right';
+        }
+
+        changeDirection(newDirection) {
+            if (newDirection === 'up' && this.direction !== 'down') {
+                this.nextDirection = 'up';
+            } else if (newDirection === 'down' && this.direction !== 'up') {
+                this.nextDirection = 'down';
+            } else if (newDirection === 'left' && this.direction !== 'right') {
+                this.nextDirection = 'left';
+            } else if (newDirection === 'right' && this.direction !== 'left') {
+                this.nextDirection = 'right';
+            }
+        }
+
+        move() {
+            this.direction = this.nextDirection;
+            const head = { ...this.body[0] }; // Copy head
+
+            switch (this.direction) {
+                case 'up': head.y--; break;
+                case 'down': head.y++; break;
+                case 'left': head.x--; break;
+                case 'right': head.x++; break;
+            }
+
+            this.body.unshift(head);
+        }
+
+        grow() {
+            // The move method already adds a new head, so for growing, we just don't pop the tail.
+            // This method is called in place of popTail()
+        }
+        
+        popTail() {
+            this.body.pop();
+        }
+
+        checkCollision() {
+            const head = this.body[0];
+            // Wall collision
+            if (head.x < 0 || head.x >= this.tileCount || head.y < 0 || head.y >= this.tileCount) {
+                return true;
+            }
+            // Self collision
+            for (let i = 1; i < this.body.length; i++) {
+                if (head.x === this.body[i].x && head.y === this.body[i].y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        draw(ctx) {
+            ctx.fillStyle = '#2ecc71'; // Snake color
+            ctx.strokeStyle = '#27ae60'; // Snake border
+            this.body.forEach(part => {
+                ctx.fillRect(part.x * this.gridSize, part.y * this.gridSize, this.gridSize, this.gridSize);
+                ctx.strokeRect(part.x * this.gridSize, part.y * this.gridSize, this.gridSize, this.gridSize);
+            });
+        }
+    }
+
+    class Food {
+        constructor(tileCount, gridSize, snakeBody) {
+            this.tileCount = tileCount;
+            this.gridSize = gridSize;
+            this.respawn(snakeBody);
+        }
+
+        respawn(snakeBody) {
+            let validPosition = false;
+            while (!validPosition) {
+                this.x = Math.floor(Math.random() * this.tileCount);
+                this.y = Math.floor(Math.random() * this.tileCount);
+                validPosition = !snakeBody.some(part => part.x === this.x && part.y === this.y);
+            }
+        }
+
+        draw(ctx) {
+            ctx.fillStyle = '#e74c3c'; // Food color
+            ctx.strokeStyle = '#c0392b'; // Food border
+            ctx.fillRect(this.x * this.gridSize, this.y * this.gridSize, this.gridSize, this.gridSize);
+            ctx.strokeRect(this.x * this.gridSize, this.y * this.gridSize, this.gridSize, this.gridSize);
+        }
+    }
+
+    class Game {
+        constructor(canvas) {
+            this.canvas = canvas;
+            this.ctx = canvas.getContext('2d');
+            this.tileCount = 20;
+            this.gridSize = canvas.width / this.tileCount;
+
+            this.score = 0;
+            this.speed = 150;
+            this.gameInterval = null;
+            this.isGameOver = false;
+
+            this.snake = new Snake(this.tileCount, this.gridSize);
+            this.food = new Food(this.tileCount, this.gridSize, this.snake.body);
+            
+            this.setupUI();
+        }
+        
+        setupUI() {
+            this.scoreDisplay = document.getElementById('score-display');
+            this.startScreen = document.getElementById('start-screen');
+            this.gameOverScreen = document.getElementById('game-over-screen');
+            this.finalScoreDisplay = document.getElementById('final-score');
+            
+            document.getElementById('start-button').addEventListener('click', () => this.start());
+            document.getElementById('restart-button').addEventListener('click', () => this.start());
+        }
+
+        start() {
+            // Reset game state
+            this.score = 0;
+            this.speed = 150;
+            this.isGameOver = false;
+            this.snake.reset();
+            this.food.respawn(this.snake.body);
+
+            // Update UI
+            this.startScreen.classList.add('hidden');
+            this.gameOverScreen.classList.add('hidden');
+            this.scoreDisplay.classList.remove('hidden');
+            this.updateScoreDisplay();
+
+            // Clear any existing interval
+            if (this.gameInterval) {
+                clearInterval(this.gameInterval);
+            }
+
+            // Start game loop
+            this.gameInterval = setInterval(() => this.gameLoop(), this.speed);
+            
+            // Start listening for input
+            this.listenForInput();
+        }
+
+        gameLoop() {
+            if (this.isGameOver) return;
+            
+            this.update();
+            this.draw();
+        }
+
+        update() {
+            this.snake.move();
+
+            if (this.snake.checkCollision()) {
+                this.endGame();
+                return;
+            }
+
+            const head = this.snake.body[0];
+            if (head.x === this.food.x && head.y === this.food.y) {
+                this.snake.grow();
+                this.food.respawn(this.snake.body);
+                this.score += 10;
+                this.updateScoreDisplay();
+                // Increase speed
+                if (this.score % 50 === 0 && this.speed > 60) {
+                    this.speed -= 10;
+                    clearInterval(this.gameInterval);
+                    this.gameInterval = setInterval(() => this.gameLoop(), this.speed);
+                }
+            } else {
+                this.snake.popTail();
+            }
+        }
+
+        draw() {
+            // Clear canvas
+            this.ctx.fillStyle = '#34495e'; // Background color
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+            // Draw game elements
+            this.snake.draw(this.ctx);
+            this.food.draw(this.ctx);
+        }
+        
+        endGame() {
+            this.isGameOver = true;
+            clearInterval(this.gameInterval);
+            this.gameOverScreen.classList.remove('hidden');
+            this.scoreDisplay.classList.add('hidden');
+            this.finalScoreDisplay.innerText = `你的分數: ${this.score}`;
+        }
+        
+        updateScoreDisplay() {
+            this.scoreDisplay.innerText = `分數: ${this.score}`;
+        }
+
+        listenForInput() {
+            document.addEventListener('keydown', (e) => {
+                switch(e.key) {
+                    case 'ArrowUp': this.snake.changeDirection('up'); break;
+                    case 'ArrowDown': this.snake.changeDirection('down'); break;
+                    case 'ArrowLeft': this.snake.changeDirection('left'); break;
+                    case 'ArrowRight': this.snake.changeDirection('right'); break;
+                }
+            });
+        }
+    }
+
+    window.addEventListener('load', () => {
+        const canvas = document.getElementById('gameCanvas');
+        new Game(canvas);
+    });
+
+</script>
+
+</body>
+</html>
